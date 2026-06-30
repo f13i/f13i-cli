@@ -1,6 +1,7 @@
 import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import type { ContentPiece } from '../../lib/types'
+import { SOURCE_META } from '../../lib/types'
 import { FormatBadge } from '../ui/Badge'
 import { AgentStatusSlot } from './AgentStatusSlot'
 import { ageLabel, ageTier, AGE_TIER_CLASS } from '../../lib/age'
@@ -14,10 +15,11 @@ interface Props {
 
 export function Card({ piece, onOpen, overlay = false }: Props) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: piece.id, disabled: overlay })
+    useDraggable({ id: piece.id, disabled: overlay || piece.locked })
 
   const tier = ageTier(piece.stage_since)
   const overridden = piece.human_override
+  const src = SOURCE_META[piece.source]
 
   const style = overlay
     ? undefined
@@ -27,12 +29,13 @@ export function Card({ piece, onOpen, overlay = false }: Props) {
     <div
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
+      {...(piece.locked ? {} : listeners)}
+      {...(piece.locked ? {} : attributes)}
       onClick={() => !overlay && onOpen(piece)}
       className={[
-        'group cursor-grab select-none rounded-md border bg-surface-2 p-2.5 text-left',
-        'transition-colors hover:border-neutral-600 active:cursor-grabbing',
+        'group select-none rounded-md border bg-surface-2 p-2.5 text-left',
+        'transition-colors hover:border-neutral-600',
+        piece.locked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
         overridden
           ? 'border-l-2 border-l-red-500 border-y-edge border-r-edge'
           : 'border-edge',
@@ -41,7 +44,16 @@ export function Card({ piece, onOpen, overlay = false }: Props) {
       ].join(' ')}
     >
       <div className="mb-1.5 flex items-start justify-between gap-2">
-        <FormatBadge format={piece.format} />
+        <div className="flex items-center gap-1.5">
+          <FormatBadge format={piece.format} />
+          {piece.source !== 'vault' && (
+            <span
+              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${src.tint}`}
+            >
+              {src.label}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1.5">
           {piece.issue_number != null && (
             <span className="text-[10px] font-medium text-neutral-500">

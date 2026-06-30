@@ -1,0 +1,31 @@
+{
+  "_comment": "Snapshot of Beehiiv 'The Deal Room' posts, refreshed via the Beehiiv MCP (list_posts). Used when BEEHIIV_API_KEY is not set. Re-run the refresh to update.",
+  "refreshed_at": "2026-06-30",
+  "publication_url": "https://f13i.beehiiv.com/",
+  "posts": [
+    {
+      "id": "post_ef23aca4-db1a-446d-bb7d-ea898ea9f0d2",
+      "title": "3/ how to raise prices without losing the base",
+      "status": "scheduled",
+      "scheduled_at": "2026-07-01T14:00:00Z",
+      "created_at": "2026-06-30T20:30:42Z",
+      "updated_at": "2026-06-30T20:43:44Z"
+    },
+    {
+      "id": "post_a7e64bfd-d2a3-4bab-878a-021e1ab44c36",
+      "title": "2/ cost of concessions",
+      "status": "published",
+      "scheduled_at": "2026-06-19T13:59:00Z",
+      "created_at": "2026-06-18T13:54:02Z",
+      "updated_at": "2026-06-19T13:59:03Z"
+    },
+    {
+      "id": "post_7589ef4a-9f23-4676-a6a0-56350bfa6c0c",
+      "title": "1/ fair use policy",
+      "status": "published",
+      "scheduled_at": "2026-06-01T13:00:00Z",
+      "created_at": "2026-05-17T21:28:33Z",
+      "updated_at": "2026-06-01T13:00:14Z"
+    }
+  ]
+}

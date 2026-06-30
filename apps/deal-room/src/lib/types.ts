@@ -9,6 +9,9 @@ export type Format =
   | 'case_study'
   | 'roundup'
 
+/** Where a piece physically lives — its system of record. */
+export type Source = 'vault' | 'beehiiv' | 'backlog'
+
 export interface ContentPiece {
   id: string
   title: string
@@ -31,7 +34,27 @@ export interface ContentPiece {
   published_at: string | null
   /** when the piece last entered its current stage — drives the age indicator */
   stage_since: string
+  /** system of record: vault note, Beehiiv post, or read-only backlog bullet */
+  source: Source
+  /** true for Beehiiv + backlog cards — not draggable, not editable here */
+  locked: boolean
 }
+
+export const SOURCE_META: Record<Source, { label: string; tint: string }> = {
+  vault: { label: 'Vault', tint: 'bg-surface-3 text-neutral-400 ring-edge' },
+  beehiiv: {
+    label: 'Beehiiv',
+    tint: 'bg-orange/15 text-orange-soft ring-orange/30',
+  },
+  backlog: {
+    label: 'Backlog',
+    tint: 'bg-neutral-500/10 text-neutral-500 ring-neutral-600/40',
+  },
+}
+
+/** Stages a vault note can be dragged/set to. Ready + Published are owned by
+ *  Beehiiv (publishing stays in Beehiiv), so vault cards stop at QA. */
+export const VAULT_STAGES: Stage[] = ['idea', 'draft', 'qa']
 
 /** Fields the operator can create/edit. Server owns ids and timestamps. */
 export type ContentPieceInput = Partial<

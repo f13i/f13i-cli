@@ -9,7 +9,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import type { ContentPiece, Stage } from '../../lib/types'
-import { STAGE_LABEL, STAGE_ORDER } from '../../lib/types'
+import { STAGE_LABEL, STAGE_ORDER, VAULT_STAGES } from '../../lib/types'
 import { Column } from './Column'
 import { Card } from './Card'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
@@ -61,6 +61,10 @@ export function Board({ pieces, onOpen, onMoveStage, onQuickAdd }: Props) {
     const to = String(over.id) as Stage
     const piece = pieces.find((p) => p.id === id)
     if (!piece || piece.stage === to) return
+
+    // Ready + Published are owned by Beehiiv — publishing happens there, not by
+    // dragging a vault note. Ignore drops into those columns.
+    if (!VAULT_STAGES.includes(to)) return
 
     // PRD §7: Draft -> QA gets a single confirm to reduce accidental moves
     if (piece.stage === 'draft' && to === 'qa') {

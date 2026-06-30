@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { isSupabaseConfigured } from './lib/supabase'
 import type { ContentPiece, Stage } from './lib/types'
 import {
   useContentPieces,
@@ -8,7 +7,6 @@ import {
   useUpdatePiece,
   useUpdateStage,
 } from './hooks/useContentPieces'
-import { useRealtime } from './hooks/useRealtime'
 import { useHotkey } from './hooks/useHotkey'
 import {
   EMPTY_FILTERS,
@@ -22,15 +20,12 @@ import { ListView } from './components/list/ListView'
 import { Archive } from './components/archive/Archive'
 import { DetailDrawer } from './components/drawer/DetailDrawer'
 import { QuickCapture } from './components/inbox/QuickCapture'
-import { SetupScreen } from './components/SetupScreen'
 
 export default function App() {
-  if (!isSupabaseConfigured) return <SetupScreen />
   return <Dashboard />
 }
 
 function Dashboard() {
-  useRealtime()
   const { data: pieces = [], isLoading, isError, error } = useContentPieces()
 
   const createPiece = useCreatePiece()
@@ -88,7 +83,8 @@ function Dashboard() {
               {(error as Error)?.message}
             </pre>
             <p className="mt-2 text-xs text-red-400/70">
-              Did you run <code>supabase/schema.sql</code> in your project?
+              Is the backend running? Start it with <code>npm run dev</code>;
+              check the vault path in the terminal output.
             </p>
           </div>
         )}

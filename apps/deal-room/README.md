@@ -1,81 +1,81 @@
 # The Deal Room — Content Pipeline Dashboard
 
-A kanban-style dashboard for managing _The Deal Room_ newsletter content from idea
-to published. Phase 1 is a manual tracker; the data model and UI are built so the
-Phase 2 agent observation layer drops in additively (see [Phase 2](#phase-2-whats-already-scaffolded)).
+A kanban dashboard for _The Deal Room_ newsletter that reads your **actual sources
+of truth** — Obsidian for ideas/drafts, Beehiiv for what's scheduled and live. No
+separate database, no double-entry. Phase 1 is a manual tracker; the data model and
+UI are built so the Phase 2 agent observation layer drops in additively.
 
-- **Stack:** Vite + React + TypeScript, Tailwind, `@dnd-kit`, Supabase (Postgres +
-  Realtime), TanStack Query.
-- **Runs:** local-only on `http://localhost:5180`, no auth.
+- **Stack:** Vite + React + TypeScript, Tailwind, `@dnd-kit`, TanStack Query, plus a
+  small local Node/Express backend that reads the vault + Beehiiv.
+- **Runs:** local-only on `http://localhost:5180`, one process, no auth.
+
+## How it maps your sources
+
+| Column | Source of truth | Writable from the board? |
+| --- | --- | --- |
+| **Ideas** | New idea notes you capture (⌘K) + read-only bullets from your idea backlog | ✅ new notes / drag |
+| **Draft** | Vault notes in `50-content/articles/` with `status: draft` | ✅ drag + edit |
+| **QA / Review** | Vault notes with `status: final` (or `stage: qa`) | ✅ drag + edit |
+| **Ready to Publish** | Beehiiv **scheduled** posts | read-only (publish in Beehiiv) |
+| **Published / Live** | Beehiiv **published** posts | read-only |
+
+Dragging a card between **Ideas / Draft / QA** rewrites only the `stage:` field in
+the note's frontmatter — your body and other frontmatter keys are never touched.
+**Ready** and **Published** come from Beehiiv; publishing stays in Beehiiv (the board
+reflects it, doesn't drive it). Vault notes that are already `status: published` are
+hidden so they don't double-show with their Beehiiv issue.
 
 ## Setup
 
 ```bash
 cd apps/deal-room
 npm install
+npm run dev          # starts the vault+Beehiiv backend AND the UI on :5180
 ```
 
-1. **Create a Supabase project** (free tier) at
-   [supabase.com/dashboard](https://supabase.com/dashboard).
-2. **Run the schema.** Open the project's **SQL Editor → New query**, paste the
-   contents of [`supabase/schema.sql`](supabase/schema.sql), and **Run**. This
-   creates the tables, the `updated_at`/`stage_since` trigger, a permissive RLS
-   policy, enables Realtime, and inserts ~8 seed pieces.
-3. **Add your keys.** From **Project Settings → API**, copy the project URL and the
-   `anon` public key:
-   ```bash
-   cp .env.example .env
-   # edit .env:
-   # VITE_SUPABASE_URL=https://<ref>.supabase.co
-   # VITE_SUPABASE_ANON_KEY=<anon-public-key>
-   ```
-4. **Run it.**
-   ```bash
-   npm run dev
-   ```
-   Opens `http://localhost:5180`. (If `.env` is missing you'll get a setup checklist
-   instead of a crash.)
+That's it — it runs with **no config**, using the default f13i-brain vault path and a
+cached Beehiiv snapshot. Optional `.env` (see `.env.example`):
+
+- `OBSIDIAN_VAULT_PATH` / `DEAL_ROOM_CONTENT_DIRS` — point at a different vault/folders.
+- `BEEHIIV_API_KEY` — switch Beehiiv from the cached snapshot to **live** reads. Without
+  it, the Ready/Published columns come from `server/cache/beehiiv-posts.json` (refresh
+  that via the Beehiiv MCP / `list_posts` when issues change).
 
 ## Using it
 
-- **Board** — five columns (Ideas → Draft → QA → Ready → Published). Drag a card to
-  change stage. Dragging **Draft → QA** asks for a one-click confirm. Cards flagged
-  `human override` get a red border and float to the top of their column.
-- **Quick capture** — press **⌘K** (or **+ Idea**) anywhere to drop an idea into the
-  Ideas column instantly.
-- **Age** — each card shows time-in-stage; it turns **yellow after 7 days**, **orange
-  after 14** to surface stuck content.
-- **Detail drawer** — click any card to edit title, hook, notes, tags, format, stage,
-  assignment, issue #, word count, and the override flag, or delete it.
-- **List** — sortable table across all stages. **Archive** — read-only published log.
-- **Filters** — by format, tag, and assignee (top right).
+- **Board** — drag a card across Ideas → Draft → QA; **Draft → QA** asks for a one-click
+  confirm. Override-flagged cards get a red border and float to the top of their column.
+- **⌘K quick capture** — drop an idea; it's written as a new note in your vault.
+- **Age** — time-in-stage turns **yellow after 7 days**, **orange after 14**.
+- **Detail drawer** — click a vault card to edit title, hook, notes, tags, format, stage,
+  assignment, issue #, and the override flag (writes back to frontmatter), or delete the
+  note. Beehiiv + backlog cards open read-only.
+- **List / Archive** — sortable table; read-only published log.
+- Board polls every 15s, so edits made directly in your vault or in Beehiiv show up
+  without a manual refresh.
 
-Changes persist to Supabase and propagate live via Realtime (open a second tab to see
-it). All reads/writes go through [`src/lib/api.ts`](src/lib/api.ts) — the single seam.
+## Architecture
+
+```
+React UI ──fetch /api──► Express backend (server/) ──► Obsidian vault (fs, frontmatter)
+                                                   └──► Beehiiv (live API or cache)
+```
+
+- All UI data access goes through one seam: [`src/lib/api.ts`](src/lib/api.ts).
+- All vault/Beehiiv access lives in [`server/`](server/): `vault.mjs` (read notes, patch
+  frontmatter — body-safe), `beehiiv.mjs` (live or cached), `map.mjs` (→ unified
+  `ContentPiece`), `api.mjs` (REST routes).
 
 ## Phase 2 — what's already scaffolded
 
-The build deliberately reserves space for the agent observation layer so it's
-_additive, not a rewrite_ (PRD §8):
+- Every card renders an **agent status slot** (the pulse indicator) — empty in Phase 1.
+  When agents run, they write `agent_status` and it animates live.
+- **`human_override`** is the agent hand-raise mechanism — already floats a card to the
+  top with a red border.
+- Adding agents means writing to the same notes / fields the board already reads —
+  additive, not a rewrite.
 
-- **`agent_status` + `assigned_to`** columns exist; agents write to them via the
-  Supabase API from external processes. Every card renders an **agent status slot**
-  (the pulsing indicator) — empty in Phase 1, live in Phase 2.
-- **`human_override`** is the agent hand-raise mechanism — already wired to float a
-  card to the top with a red border.
-- **`agent_events`** table is an append-only activity log, ready for the per-card
-  event stream and the global "Agent Activity" panel.
-- **Realtime** is on, so external agent writes already surface with no polling.
+## Out of scope (v1)
 
-### Phase 2 hardening (not done yet)
-
-- RLS is a permissive `anon` policy for local single-operator use. **Before deploying
-  anywhere**, replace it with authenticated policies and route agent writes through a
-  service role.
-
-## Data model
-
-See [`supabase/schema.sql`](supabase/schema.sql) — `content_pieces` (the atomic unit)
-and `agent_events` (Phase 2 log). Enums (`stage`, `format`) are enforced with CHECK
-constraints; `assigned_to` is free-form text so agent names slot in without a
-migration.
+No auth/multi-user, no rich-text editor, no automated publishing to Beehiiv (read-only
+by design), no analytics, desktop-only.

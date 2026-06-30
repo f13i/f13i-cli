@@ -18,6 +18,10 @@ export function useContentPieces() {
   return useQuery({
     queryKey: PIECES_KEY,
     queryFn: listPieces,
+    // The vault + Beehiiv can change outside the app (editing notes, Beehiiv
+    // publishing). Poll so the board reflects reality without a manual refresh.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   })
 }
 

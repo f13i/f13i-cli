@@ -1,57 +1,61 @@
-// Data-access layer. EVERY read/write to Supabase goes through here — this is
-// the single seam where a future sync layer (Beehiiv / Granola / Linear) plugs
-// in without touching components. Do not call `supabase` from anywhere else.
+// Data-access layer. EVERY read/write goes through here — the single seam over
+// the local backend (which fronts the Obsidian vault + Beehiiv). Components
+// never fetch directly.
 
-import { supabase } from './supabase'
 import type { ContentPiece, ContentPieceInput, Stage } from './types'
 
-const TABLE = 'content_pieces'
+const BASE = '/api'
 
-export async function listPieces(): Promise<ContentPiece[]> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('*')
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return (data ?? []) as ContentPiece[]
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const body = await res.json()
+      if (body?.error) msg = body.error
+    } catch {
+      /* non-JSON error */
+    }
+    throw new Error(msg)
+  }
+  return res.json() as Promise<T>
 }
 
-export async function createPiece(
-  input: ContentPieceInput,
-): Promise<ContentPiece> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .insert(input)
-    .select('*')
-    .single()
-  if (error) throw error
-  return data as ContentPiece
+export async function listPieces(): Promise<ContentPiece[]> {
+  return json<ContentPiece[]>(await fetch(`${BASE}/pieces`))
+}
+
+/** Quick capture — the backend only needs a title; it creates an idea note. */
+export async function createPiece(input: ContentPieceInput): Promise<void> {
+  await json(
+    await fetch(`${BASE}/pieces`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: input.title }),
+    }),
+  )
 }
 
 export async function updatePiece(
   id: string,
   patch: ContentPieceInput,
-): Promise<ContentPiece> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update(patch)
-    .eq('id', id)
-    .select('*')
-    .single()
-  if (error) throw error
-  return data as ContentPiece
+): Promise<void> {
+  await json(
+    await fetch(`${BASE}/pieces/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  )
 }
 
-/** Stage moves go through their own call so the intent is explicit at the
- *  call site (the DB trigger handles stage_since / published_at). */
-export async function updateStage(
-  id: string,
-  stage: Stage,
-): Promise<ContentPiece> {
+export async function updateStage(id: string, stage: Stage): Promise<void> {
   return updatePiece(id, { stage })
 }
 
 export async function deletePiece(id: string): Promise<void> {
-  const { error } = await supabase.from(TABLE).delete().eq('id', id)
-  if (error) throw error
+  await json(
+    await fetch(`${BASE}/pieces/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  )
 }

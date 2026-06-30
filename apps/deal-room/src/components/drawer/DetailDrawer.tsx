@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ContentPiece, ContentPieceInput, Format, Stage } from '../../lib/types'
-import { FORMATS, STAGES } from '../../lib/types'
+import { FORMATS, SOURCE_META, STAGES, VAULT_STAGES } from '../../lib/types'
 import { useHotkey } from '../../hooks/useHotkey'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { AgentStatusSlot } from '../board/AgentStatusSlot'
@@ -11,6 +11,8 @@ interface Props {
   onUpdate: (id: string, patch: ContentPieceInput) => void
   onDelete: (id: string) => void
 }
+
+const STAGE_OPTIONS = STAGES.filter((s) => VAULT_STAGES.includes(s.key))
 
 function Field({
   label,
@@ -69,6 +71,9 @@ export function DetailDrawer({ piece, onClose, onUpdate, onDelete }: Props) {
     commit({ topic_tags: piece.topic_tags.filter((x) => x !== tag) })
   }
 
+  // Beehiiv + backlog cards are read-only here — they're not vault notes.
+  if (piece.locked) return <LockedDetail piece={piece} onClose={onClose} />
+
   return (
     <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
@@ -107,7 +112,7 @@ export function DetailDrawer({ piece, onClose, onUpdate, onDelete }: Props) {
                 value={piece.stage}
                 onChange={(e) => commit({ stage: e.target.value as Stage })}
               >
-                {STAGES.map((s) => (
+                {STAGE_OPTIONS.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
                   </option>
@@ -226,15 +231,9 @@ export function DetailDrawer({ piece, onClose, onUpdate, onDelete }: Props) {
               />
             </Field>
             <Field label="Words">
-              <input
-                type="number"
-                className={inputCls}
-                defaultValue={piece.word_count ?? ''}
-                onBlur={(e) => {
-                  const v = e.target.value ? Number(e.target.value) : null
-                  if (v !== piece.word_count) commit({ word_count: v })
-                }}
-              />
+              <div className={`${inputCls} text-neutral-400`}>
+                {piece.word_count ?? '—'}
+              </div>
             </Field>
           </div>
 
@@ -300,6 +299,98 @@ export function DetailDrawer({ piece, onClose, onUpdate, onDelete }: Props) {
           onCancel={() => setConfirmDelete(false)}
         />
       )}
+    </div>
+  )
+}
+
+// Read-only detail for Beehiiv posts + backlog ideas (not vault notes).
+function LockedDetail({
+  piece,
+  onClose,
+}: {
+  piece: ContentPiece
+  onClose: () => void
+}) {
+  useHotkey('escape', onClose)
+  const src = SOURCE_META[piece.source]
+  const beehiiv = piece.source === 'beehiiv'
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50" />
+      <div
+        className="relative flex h-full w-full max-w-md flex-col border-l border-edge bg-surface-2 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge px-4 py-3">
+          <span
+            className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${src.tint}`}
+          >
+            {src.label} · read-only
+          </span>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-neutral-500 hover:bg-surface-3 hover:text-neutral-200"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <h2 className="text-lg font-semibold leading-snug text-neutral-100">
+            {piece.title}
+          </h2>
+
+          <p className="text-sm text-neutral-400">
+            {beehiiv
+              ? 'This piece lives in Beehiiv. Edit or publish it from the Beehiiv dashboard — the board reflects its status.'
+              : 'From your idea backlog. Press ⌘K to capture it as a tracked note you can move through the pipeline.'}
+          </p>
+
+          <dl className="space-y-2 text-sm">
+            {piece.issue_number != null && (
+              <Row label="Issue">#{piece.issue_number}</Row>
+            )}
+            <Row label="Status">{piece.stage}</Row>
+            {piece.published_at && (
+              <Row label="Published">
+                {new Date(piece.published_at).toLocaleDateString()}
+              </Row>
+            )}
+          </dl>
+
+          {beehiiv && (
+            <a
+              href="https://f13i.beehiiv.com/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex rounded-md border border-edge px-3 py-1.5 text-xs text-orange-soft hover:bg-surface-3"
+            >
+              Open in Beehiiv ↗
+            </a>
+          )}
+
+          <div className="rounded-md border border-edge bg-surface-1 px-3 py-2.5">
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
+              Agent status
+            </span>
+            <AgentStatusSlot
+              agentStatus={piece.agent_status}
+              assignedTo={piece.assigned_to}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex justify-between border-b border-edge/60 pb-2">
+      <dt className="text-neutral-500">{label}</dt>
+      <dd className="text-neutral-200">{children}</dd>
     </div>
   )
 }
