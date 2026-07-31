@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+*.log
+logs/
+
+# Secrets — never commit any .env variant except the template
+.env
+.env.*
+!.env.example
+.claude-env
+
+# Local tool / editor config (may contain machine-specific paths or research queries)
+.claude/
+.codex/
+temp/
+
+# Local dev scratch
+test-granola.js

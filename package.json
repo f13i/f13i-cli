@@ -1,0 +1,30 @@
+{
+  "name": "f13i-cli",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "bin": {
+    "f13i": "./index.js"
+  },
+  "scripts": {
+    "outbound-sync": "node agents/outbound-sync.js",
+    "action-items-sync": "node agents/action-items-sync.js",
+    "deal-status-sync": "node agents/deal-status-sync.js",
+    "pricing-intel": "node agents/pricing-intel.js",
+    "morning": "bash scripts/morning.sh",
+    "session-close": "bash scripts/session-close.sh",
+    "weekly-sync": "bash scripts/weekly-sync.sh",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "axios": "^1.16.1",
+    "date-fns": "^4.4.0",
+    "dotenv": "^17.4.2",
+    "node-fetch": "^3.3.2"
+  }
+}
