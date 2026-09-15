@@ -15,7 +15,7 @@ placeholders.
 | --- | --- |
 | **Pricing deliverables** | `pricing-proposal-builder` · `pricing-calculator-builder` · `client-safe-deliverable` · `pricingsaas-report-builder` |
 | **Outreach & pipeline** | `cold-email` · `bulk-cold-email` · `outbound-sync` · `call-prep` · `deal-filer` · `coaching-call-update` |
-| **Intelligence & research** | `ci-pricing-job-scraper` · `website-advisor` |
+| **Intelligence & research** | `ci-pricing-job-scraper` · `website-advisor` · `wtp-call-digest` |
 | **Content** | `linkedin-post-generator` · `humanizer` · `childrens-story-builder` |
 | **Second-brain & knowledge ops** | `load-f13i-docs` · `business-doc-update` · `weekly-brain-sync` |
 | **System / meta** | `leverage-finder` · `skill-auditor` · `weekly-system-review` · `netlify-deploy` |

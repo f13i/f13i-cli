@@ -243,3 +243,19 @@ Staged topics from Farhan's content pipeline (check writing.md for current statu
 8. WTP research is not a survey
 9. Seat-to-usage transition kills from inside
 10. Renewal value engineering panic
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Granola or Obsidian call, run `tool_search` for each ("granola meetings", "obsidian get note") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. A post sourced from an empty corpus read is a generic post in the wrong voice. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

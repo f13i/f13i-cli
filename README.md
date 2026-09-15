@@ -3,7 +3,7 @@
 # f13i-cli: the system that runs a solo pricing consultancy
 
 **The real setup I use to run [f13i](https://f13i.com), my SaaS pricing consultancy.**
-24 agents running on a schedule or always on, 22 skills in this repo,
+24 agents running on a schedule or always on, 23 skills in this repo,
 and the f13i labs tools they connect to.
 
 `pricing proposals` · `deal desk` · `competitor pricing` · `cost and quality control` · `content`
@@ -195,6 +195,7 @@ The f13i labs tools live in their own repos.
 | `action-items-sync.js` | reconciles the action-items list from vault sources |
 | `deal-status-sync.js` | deal pulse and recording-gap detection |
 | `pricing-intel.js` | pricing intelligence run on a company |
+| `linkedin-publish.js` | posts the day's approved LinkedIn draft, with its image, through the LinkedIn API |
 
 ### Skills ([`skills/`](skills/))
 <details open>
@@ -222,6 +223,7 @@ The f13i labs tools live in their own repos.
 
 - **`ci-pricing-job-scraper`**: find companies hiring for pricing roles.
 - **`website-advisor`**: turn prospect conversations and competitor sites into ranked changes for f13i.com.
+- **`wtp-call-digest`**: turn a batch of willingness-to-pay interviews into a per-buyer number table, a cross-read and a readout.
 </details>
 
 <details>
@@ -248,6 +250,12 @@ The f13i labs tools live in their own repos.
 - **`weekly-system-review`**: reconcile what's running and promote one skill a week.
 - **`netlify-deploy`**: build, validate and ship f13i.com.
 </details>
+
+### Side automation ([`atlas-calendar-automation/`](atlas-calendar-automation/))
+A Google Apps Script that scrapes a training organization's schedule each week,
+appends new sessions to a sheet and creates the matching calendar events. Append
+and create only; it never edits or deletes. A small example of the same rule:
+automate the chore end to end, and make it safe to run twice.
 
 ### Apps ([`apps/deal-room/`](apps/deal-room/))
 **The Deal Room**: a kanban board for my newsletter pipeline. It reads Obsidian for

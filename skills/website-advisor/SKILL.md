@@ -201,3 +201,19 @@ After presenting, offer: "Once you've accepted any changes, say 'deploy to Netli
 - **Skill is additive** — each weekly run should flag new signals (from new calls) vs. patterns that have appeared before. If the same friction signal appeared in 3 consecutive weeks, escalate its priority.
 - **Weekly cadence** — designed to run every Thursday or Friday, covering calls from the preceding 7 days
 - **Full deploy folder awareness** — any HTML snippet generated must be consistent with the full f13i deploy stack: index.html, fair-use.html, pricing-problem.html, resources.html, _redirects, og.png. Never suggest a change that breaks site-wide consistency.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Granola or Obsidian call, run `tool_search` for each ("granola meetings", "obsidian get note") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. The whole skill rests on call evidence — if the Granola leg is empty, stop rather than fall back to generic site advice. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

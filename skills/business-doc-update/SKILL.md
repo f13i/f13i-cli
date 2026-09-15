@@ -78,3 +78,19 @@ While reviewing, flag any pipeline entries or status items that appear stale bas
 - Only touch sections that actually changed — don't regenerate the whole doc.
 - Keep updates concise — matching the existing doc's density and style.
 - If a section doesn't exist yet, create it and label it clearly as a new section.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Obsidian call, run `tool_search` for each ("obsidian get note", "obsidian patch") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. Never report a vault write that did not execute; re-read the target section after patching. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

@@ -77,3 +77,19 @@ Farhan closes every proposal session by updating his vault. Do this automaticall
 - **Match the artifact to the ask.** A commission plan, a SaaS packaging redesign, and a price-increase model are different shapes. Don't force a comp-plan template onto a packaging problem.
 - **Be honest about what's a judgment call.** Numbers that genuinely depend on the CEO's risk appetite (quota aggressiveness, discount floors) should be surfaced *as* decisions, not buried as if they were derived. That honesty is what makes the derived numbers credible.
 - **Keep the client's real constraints in view.** Grounding a quota in "8 customers at $17K ACV, unproven motion" beats any benchmark. Bottoms-up beats top-down.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Granola or Obsidian call, run `tool_search` for each ("granola meetings", "obsidian get note") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. A proposal missing the discovery-call leg will contradict what the client said in the room. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

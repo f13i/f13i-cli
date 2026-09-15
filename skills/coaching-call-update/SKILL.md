@@ -78,26 +78,38 @@ Note the event ID for potential calendar note creation.
 
 ---
 
-## Step 5: Attempt Calendar Event
-Try to add the update as a note on the your coach coaching event:
+## Step 5: Write the Shadow Prep Event
+The update goes on a private prep block, never on the coaching invite itself — your coach should not see it.
 
+First look for an existing prep event in that slot:
+```
+tool: Google Calendar:list_events
+timeMin/timeMax: [the coaching call's start/end]
+q: "Prep:"
+```
+
+If one exists, update it:
 ```
 tool: Google Calendar:update_event
-eventId: [ID from Step 3]
+eventId: [the prep event's ID — NOT the coaching event ID from Step 3]
 description: [paste the investor update]
 sendUpdates: none
 ```
 
-If update fails (Farhan is not the organizer), create a parallel private event:
+If none exists, create it:
 ```
 tool: Google Calendar:create_event
-summary: "Notes for your coach Conversation"
-start: [same time as coaching call]
-end: [same time as coaching call end]
+summary: "Prep: your coach conversation"
+start: [same as the coaching call]
+end: [same as the coaching call end]
 description: [investor update]
+attendees: []          # never add your coach
+visibility: private
+transparency: transparent
+sendUpdates: none
 ```
 
-If both fail, output the update in the chat and note: "Calendar write failed — copy-paste manually into the event or a notes doc."
+Never call update_event on the coaching event ID from Step 3. If the prep write fails, output the update in the chat and note: "Calendar write failed — copy-paste it into your own prep block."
 
 ## Rules
 - your coach is numbers-first — lead every section with specifics, not narrative

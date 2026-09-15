@@ -103,3 +103,19 @@ Scaffolding #<1> — <skill-name>. Deliverable below.
 ## When re-run periodically
 
 This skill compounds when run on a cadence (e.g. monthly). On re-runs, skip clusters you already turned into skills, note whether previously-recommended skills are now being used, and focus on *new* patterns since the last audit. Offer to schedule it if Farhan runs it more than once.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Granola, Linear, or Obsidian call, run `tool_search` for each ("granola meetings", "linear list issues", "obsidian get note") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. A leverage recommendation built on a partial picture of where the time actually went is worse than none. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

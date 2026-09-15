@@ -42,3 +42,19 @@ Only load these when the task involves writing, editing, content creation, Linke
 - accomplishments.md MUST be loaded for any resume, cover letter, pitch, 1-pager, or content referencing work history.
 - If Farhan says "load my f13i docs" and also describes a task in the same message, load the docs and immediately start the task — don't wait for a second message.
 - All CTAs → cal.com/farhan-m | All email → me@f13i.com
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Obsidian call, run `tool_search` for each ("obsidian get note", "obsidian list") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. Several skills depend on this one — if a doc fails to load, say which, because downstream output will look fine and be wrong. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

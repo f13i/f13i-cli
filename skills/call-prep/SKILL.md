@@ -77,10 +77,37 @@ Output format (always follow this structure):
 ## your executive coach Coaching Calls
 When prepping for your coach, also trigger the `coaching-call-update` skill to generate the investor update section before writing the brief.
 
+### Step 7: Deliver the Brief to a Shadow Prep Event
+
+The brief never goes into the real meeting invite — attendees can read that
+description. It goes into a separate prep block on Farhan's own calendar.
+
+For each meeting:
+
+1. Look for an existing prep event in that slot (`list_events` over the call's
+   start/end, `q: "Prep:"`).
+2. If one exists → `update_event` on **that** event's ID.
+3. If not → `create_event`:
+
+```
+summary:      Prep: [Person or meeting name]
+start / end:  same start and end as the call
+description:  [the brief, plain text]
+attendees:    []                 # never the counterpart
+visibility:   private
+transparency: transparent        # shows as free, doesn't double-book the call
+sendUpdates:  none
+```
+
+Never call `update_event` on the real meeting's event ID. Confirm one line per
+meeting: `✅ [Name] — prep block set`. If the write fails, print the brief in
+chat and say the calendar write failed — do not fall back to the real invite.
+
 ## Rules
 - Never skip a step — all 4 tool checks must run even if some return nothing
 - If Granola returns no content, explicitly note "No Granola transcript found — pulling from business.md in the vault (`10-brain/02-business.md`)"
 - Brief should fit one screen — tight, executive-facing, no fluff
+- Never write a brief into the real invite's description — shadow prep event only
 - Time zone is always America/Chicago (CT) unless Farhan says otherwise
 
 ---

@@ -204,3 +204,19 @@ Output an updated version of the input spreadsheet with:
 
 - Schedule discovery runs weekly (Monday 6am CT) via Apify scheduler for
   ongoing pipeline feed.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Apify or Obsidian call, run `tool_search` for each ("apify call actor", "apify get dataset items", "obsidian get note") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. An actor run that returns zero items is a failure to report, not an empty market. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

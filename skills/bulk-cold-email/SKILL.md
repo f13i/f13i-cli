@@ -208,3 +208,19 @@ Expected columns from the clean prospect CSV:
 - `funding`
 
 If the CSV has different column names, map them to these before running.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Gmail, Calendar, Granola, or Obsidian call, run `tool_search` for each ("gmail search threads", "calendar list events", "granola meetings", "obsidian get note") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. Never send outreach off a batch where the warm-signal or prior-contact check silently returned nothing — a missing Gmail leg reads identical to a cold prospect. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

@@ -38,3 +38,19 @@ Then update the frontmatter `status`, `stage`, and `updated` to match that entry
 - Frontmatter and the latest body update must agree, updated in one edit.
 - Match existing folder capitalization; don't normalize a name that's already in use.
 - Don't invent status — pull it from what actually happened this session. If the session didn't change the stage, leave the stage and just bump `updated`.
+
+---
+
+## Preflight — resolve tool signatures at runtime
+
+**Do not trust the tool names or parameter names written above.** They drift, and
+a stale signature fails silently — the skill keeps running and produces confident
+output with a source quietly missing.
+
+Before the first Obsidian call, run `tool_search` for each ("obsidian get note", "obsidian patch") and use the
+names and parameters it returns. Names in this file are correct as of 2026-09-15;
+parameter schemas are deliberately not documented here, because hardcoding them is
+what broke `call-prep` and `outbound-sync` for months before anyone noticed.
+
+**Failure behaviour:** if a source fails, name it in the output. A write that reports success but did not execute loses the artifact — confirm the file exists on disk before reporting it filed. A partial
+result that says which leg died beats a clean-looking one that dropped a source.

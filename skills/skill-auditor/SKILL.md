@@ -44,6 +44,11 @@ Flag any skill that:
 - **hardcodes tool parameter names.** Signatures drift and the skill then fails
   silently. This killed outbound-sync v1 for months. Grep every skill for
   literal tool params and flag them; correct pattern is a `tool_search` preflight.
+- **calls a live-data MCP (Granola, Gmail, Calendar, Linear, Slack, Apify) but has
+  no `## Preflight` section and no stated failure behaviour.** The preflight is
+  what makes drift loud; without it the skill returns confident output with a leg
+  missing. Grep: a skill naming any of those sources must also name what it does
+  when one of them fails.
 - depends on a known-flaky MCP with no documented fallback
 - claims to auto-trigger but shows no run evidence — auto-trigger claims that
   don't fire are worse than no claim, they create false confidence
