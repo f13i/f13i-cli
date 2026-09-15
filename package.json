@@ -11,6 +11,8 @@
     "action-items-sync": "node agents/action-items-sync.js",
     "deal-status-sync": "node agents/deal-status-sync.js",
     "pricing-intel": "node agents/pricing-intel.js",
+    "linkedin-publish": "node agents/linkedin-publish.js",
+    "linkedin-queue": "node agents/linkedin-publish.js --queue",
     "morning": "bash scripts/morning.sh",
     "session-close": "bash scripts/session-close.sh",
     "weekly-sync": "bash scripts/weekly-sync.sh",

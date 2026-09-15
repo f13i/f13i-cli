@@ -11,7 +11,7 @@
 
 ```bash
 VAULT="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/f13i-brain"
-INDEX="$VAULT/00-index/index.md"
+INDEX="$VAULT/00-index/01-index.md"
 SESSIONS="$VAULT/90-scratch/sessions"
 DAILY="$VAULT/90-scratch/daily"
 LESSONS="$VAULT/20-agents/07-lessons.md"   # canonical log; 20-agents/lessons.md is a dead redirect stub
