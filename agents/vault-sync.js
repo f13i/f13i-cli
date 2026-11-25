@@ -40,10 +40,20 @@ const LOOKBACK_DAYS = parseInt(process.env.VAULT_SYNC_LOOKBACK || '4', 10);
 const WARM_DAYS = 21;
 const DARK_DAYS = 45;
 
-// Statuses that mean "this deal should be moving" — drift on these matters.
-const ACTIVE_RE = /(active|proposal|pre-engagement|new-inbound|discovery|warm|follow)/i;
-// Statuses that are intentionally quiet — skip staleness noise.
-const QUIET_RE = /(closed|delivered|dead|archive|dormant|nurture|parked|lost)/i;
+// Locked status vocabulary — the contract is documented in 30-deals/00-README.md
+// and rendered by 30-deals/Pipeline.base. Keep all three in sync.
+// LIVE = "this deal should be moving", so staleness and closure drift matter.
+const LIVE_STATUSES = new Set(['active', 'proposal-out', 'awaiting-reply', 'warm']);
+// QUIET = intentionally not moving. Skipped for staleness, no noise.
+const QUIET_STATUSES = new Set([
+  'cold', 'parked', 'dead-revive', 'closed-won', 'closed-lost',
+  'merged', 'networking', 'partner', 'competitor',
+]);
+const isLive = (s) => LIVE_STATUSES.has(String(s || '').trim().toLowerCase());
+const isKnown = (s) => {
+  const v = String(s || '').trim().toLowerCase();
+  return LIVE_STATUSES.has(v) || QUIET_STATUSES.has(v);
+};
 
 // Language in a meeting summary that suggests a status change.
 const CLOSURE_RE = /(wind[\s-]?down|winding down|close[\s-]?out|closeout|engagement (complete|ended|over)|off[\s-]?board|not moving forward|no longer|final payment|pausing|paused|decided to hold|going internal|keep(ing)? it internal)/i;
@@ -162,7 +172,7 @@ async function run() {
   const deals = await loadDeals();
   const meetings = await loadRecentMeetings();
 
-  const flags = { closure: [], stale: [], newLead: [] };
+  const flags = { closure: [], stale: [], newLead: [], offSchema: [] };
   const matchedFolders = new Set();
 
   // 1. Meeting-driven signals (closures + new leads)
@@ -172,7 +182,7 @@ async function run() {
     const date = (note.created_at || '').slice(0, 10);
     if (deal) {
       matchedFolders.add(deal.folder);
-      if (ACTIVE_RE.test(deal.status) && CLOSURE_RE.test(note.summary)) {
+      if (isLive(deal.status) && CLOSURE_RE.test(note.summary)) {
         const hit = (note.summary.match(CLOSURE_RE) || [])[0];
         flags.closure.push({ deal, note, date, keyword: hit });
       }
@@ -183,7 +193,8 @@ async function run() {
 
   // 2. Staleness on active deals with no recent signal
   for (const d of deals) {
-    if (!ACTIVE_RE.test(d.status) || QUIET_RE.test(d.status)) continue;
+    if (!isKnown(d.status)) flags.offSchema.push(d);
+    if (!isLive(d.status)) continue;
     if (/peer-advisory|reciprocal/i.test(`${d.fm.type} ${d.fm.relationship}`)) continue; // ongoing relationships, not pipeline
     if (matchedFolders.has(d.folder)) continue; // had a signal this window
     if (d.lastTouch >= DARK_DAYS) flags.stale.push({ deal: d, level: 'DARK', days: d.lastTouch });
@@ -212,6 +223,13 @@ async function run() {
   }
   L.push('');
 
+  L.push(`## ⚠️ Off-schema status (${flags.offSchema.length}) — status outside the locked vocabulary`);
+  if (!flags.offSchema.length) L.push('- none');
+  for (const d of flags.offSchema) {
+    L.push(`- **${d.folder}** — \`status: ${d.status}\` is not in the locked set. → Fix the file or extend the vocabulary in \`30-deals/00-README.md\` + \`agents/vault-sync.js\`. \`${d.file}\``);
+  }
+  L.push('');
+
   L.push(`## 🆕 Possible new leads (${flags.newLead.length}) — external meeting, no matching deal folder`);
   if (!flags.newLead.length) L.push('- none');
   for (const f of flags.newLead) {
@@ -231,6 +249,7 @@ async function run() {
   console.log(`\n→ Written to ${path.relative(VAULT, outFile)}`);
   logger.info('vault-sync completed', {
     closures: flags.closure.length, stale: flags.stale.length, newLeads: flags.newLead.length,
+    offSchema: flags.offSchema.length,
   });
   return { flags, outFile };
 }
