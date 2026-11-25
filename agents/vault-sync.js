@@ -2,8 +2,10 @@ require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
-const granola = require('../utils/granola-api-client');
 const logger = require('../utils/logger');
+const {
+  LIVE_STATUSES, localDate, daysSince, loadDeals, loadRecentMeetings, matchMeetingToDeal,
+} = require('../utils/deals');
 
 /**
  * vault-sync (headless drift detector)
@@ -13,7 +15,8 @@ const logger = require('../utils/logger');
  * What it does (report-only — the FLAG half of the hybrid model):
  *   1. Reads every deal folder's index file + frontmatter (status/updated/last_contact/contacts).
  *   2. Pulls recent Granola meetings (default 4 days) via the public-API client.
- *   3. Matches meetings to deals by contact name / company / email domain / folder name.
+ *   3. Matches meetings to deals (utils/deals.js): an attendee on the deal's email domain, a full
+ *      contact name, or the whole company / folder name in the title. A lone first name never matches.
  *   4. Flags drift:
  *        - CLOSURE   : an "active" deal whose matched meeting summary contains wind-down / closed language.
  *        - STALE     : an "active" deal with no signal in >21d (warm) / >45d (dark).
@@ -33,7 +36,6 @@ const logger = require('../utils/logger');
 const VAULT = (process.env.OBSIDIAN_VAULT_PATH
   || `${process.env.HOME}/Library/Mobile Documents/iCloud~md~obsidian/Documents/f13i-brain`)
   .replace(/^~(?=$|\/)/, process.env.HOME);
-const DEALS_DIR = path.join(VAULT, '30-deals');
 const DAILY_DIR = path.join(VAULT, '90-scratch', 'daily');
 
 const LOOKBACK_DAYS = parseInt(process.env.VAULT_SYNC_LOOKBACK || '4', 10);
@@ -43,7 +45,6 @@ const DARK_DAYS = 45;
 // Locked status vocabulary — the contract is documented in 30-deals/00-README.md
 // and rendered by 30-deals/Pipeline.base. Keep all three in sync.
 // LIVE = "this deal should be moving", so staleness and closure drift matter.
-const LIVE_STATUSES = new Set(['active', 'proposal-out', 'awaiting-reply', 'warm']);
 // QUIET = intentionally not moving. Skipped for staleness, no noise.
 const QUIET_STATUSES = new Set([
   'cold', 'parked', 'dead-revive', 'closed-won', 'closed-lost',
@@ -58,51 +59,6 @@ const isKnown = (s) => {
 // Language in a meeting summary that suggests a status change.
 const CLOSURE_RE = /(wind[\s-]?down|winding down|close[\s-]?out|closeout|engagement (complete|ended|over)|off[\s-]?board|not moving forward|no longer|final payment|pausing|paused|decided to hold|going internal|keep(ing)? it internal)/i;
 
-const STOPWORDS = new Set(['farhan', 'manjiyani', 'the', 'and', 'pricing', 'sync', 'call', 'meeting', 'catch', 'up', 'x', 'chat', 'feedback', 'session', 'working', '1', 'strategy']);
-
-function daysSince(dateStr) {
-  if (!dateStr || dateStr === 'open') return Infinity;
-  const d = new Date(dateStr);
-  if (isNaN(d)) return Infinity;
-  return Math.floor((Date.now() - d.getTime()) / 86400000);
-}
-
-function readFrontmatter(text) {
-  const m = text.match(/^---\n([\s\S]*?)\n---/);
-  const fm = {};
-  if (!m) return fm;
-  for (const line of m[1].split('\n')) {
-    const kv = line.match(/^([a-zA-Z_]+):\s*(.*)$/);
-    if (kv) fm[kv[1].toLowerCase()] = kv[2].trim();
-  }
-  return fm;
-}
-
-// Build a set of lowercase match-keywords for a deal from its folder + frontmatter.
-function dealKeywords(folder, fm) {
-  const kw = new Set();
-  const add = (s) => {
-    if (!s) return;
-    String(s).toLowerCase().split(/[^a-z0-9.]+/).forEach((tok) => {
-      if (tok.length > 2 && !STOPWORDS.has(tok)) kw.add(tok);
-    });
-  };
-  add(folder.replace(/-/g, ' '));
-  add(fm.company);
-  add(fm.contact);
-  add(fm.contacts);
-  add(fm.primary_contact);
-  // email domains → their brand token (e.g. airplaisports.com → airplaisports)
-  const domains = (JSON.stringify(fm).match(/@([a-z0-9.-]+)\.[a-z]{2,}/gi) || [])
-    .map((d) => d.replace(/@/, '').split('.')[0].toLowerCase());
-  domains.forEach((d) => { if (d.length > 2) kw.add(d); });
-  return kw;
-}
-
-function meetingBlob(note) {
-  const attendees = (note.attendees || []).map((a) => `${a.name || ''} ${a.email || ''}`).join(' ');
-  return `${note.title || ''} ${attendees}`.toLowerCase();
-}
 
 function isExternalMeeting(note) {
   const folder = JSON.stringify(note.folder_membership || []).toLowerCase();
@@ -114,63 +70,15 @@ function isExternalMeeting(note) {
   return others.length > 0;
 }
 
-async function loadDeals() {
-  const deals = [];
-  for (const folder of fs.readdirSync(DEALS_DIR)) {
-    const dir = path.join(DEALS_DIR, folder);
-    if (!fs.statSync(dir).isDirectory()) continue;
-    const idxFile = ['index.md', '00-INDEX.md'].map((f) => path.join(dir, f)).find(fs.existsSync);
-    if (!idxFile) continue;
-    const text = fs.readFileSync(idxFile, 'utf8');
-    const fm = readFrontmatter(text);
-    deals.push({
-      folder,
-      file: path.relative(VAULT, idxFile),
-      fm,
-      keywords: dealKeywords(folder, fm),
-      status: fm.status || 'unknown',
-      lastTouch: Math.min(daysSince(fm.last_contact), daysSince(fm.updated)),
-    });
-  }
-  return deals;
-}
-
-async function loadRecentMeetings() {
-  const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
-  let cursor = null, all = [], pages = 0;
-  do {
-    const r = await granola.getNotes({ page_size: 30, created_after: since, cursor });
-    (r.notes || []).forEach((n) => all.push(n));
-    cursor = r.next_cursor || r.cursor || null;
-    pages++;
-  } while (cursor && pages < 6);
-  // enrich with summaries
-  const enriched = [];
-  for (const n of all) {
-    try {
-      const full = await granola.getNote(n.id, false);
-      const note = full.note || full;
-      enriched.push({ ...note, summary: note.summary_markdown || note.summary_text || '' });
-    } catch (e) { enriched.push({ ...n, summary: '' }); }
-  }
-  return enriched;
-}
-
-function matchMeetingToDeal(note, deals) {
-  const blob = meetingBlob(note);
-  let best = null, bestScore = 0;
-  for (const d of deals) {
-    let score = 0;
-    for (const kw of d.keywords) if (blob.includes(kw)) score++;
-    if (score > bestScore) { bestScore = score; best = d; }
-  }
-  return bestScore > 0 ? best : null;
-}
-
 async function run() {
   logger.info('vault-sync (drift detector) started', { lookbackDays: LOOKBACK_DAYS });
-  const deals = await loadDeals();
-  const meetings = await loadRecentMeetings();
+  const deals = loadDeals().map((d) => ({
+    ...d,
+    file: `${d.link}.md`,
+    lastTouch: daysSince(d.lastTouchDate),
+  }));
+  const { notes: meetings, error: granolaError } = await loadRecentMeetings(LOOKBACK_DAYS, { withSummaries: true });
+  if (granolaError) logger.warn(`Granola unavailable, staleness only: ${granolaError}`);
 
   const flags = { closure: [], stale: [], newLead: [], offSchema: [] };
   const matchedFolders = new Set();
@@ -182,7 +90,7 @@ async function run() {
     const date = (note.created_at || '').slice(0, 10);
     if (deal) {
       matchedFolders.add(deal.folder);
-      if (isLive(deal.status) && CLOSURE_RE.test(note.summary)) {
+      if (isLive(deal.status) && CLOSURE_RE.test(note.summary || '')) {
         const hit = (note.summary.match(CLOSURE_RE) || [])[0];
         flags.closure.push({ deal, note, date, keyword: hit });
       }
@@ -202,11 +110,12 @@ async function run() {
   }
 
   // 3. Build report
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   const L = [];
   L.push(`# Vault Drift Report — ${today}`);
   L.push('');
   L.push(`_Auto-generated by \`agents/vault-sync.js\`. Report-only — apply via \`/vault-sync\` in a Zelia session. Granola lookback: ${LOOKBACK_DAYS}d._`);
+  if (granolaError) L.push('', `_Granola unavailable this run (${granolaError}): no closure or new-lead signals, and staleness ignores meetings._`);
   L.push('');
 
   L.push(`## 🔴 Closure signals (${flags.closure.length}) — deal file says active, meeting says otherwise`);
