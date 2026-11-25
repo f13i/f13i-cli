@@ -1,7 +1,7 @@
 #!/bin/bash
-# Tier 2: LLM reasoning (Claude-based agents)
+# Tier 2: reasoning agents
 # Runs: action-items-sync, deal-status-sync, pricing-intel
-# Cost: ~0.005-0.02 per run (3 Sonnet calls, ~2-5k tokens total)
+# Cost: no model calls unless PRICINGSAAS_MCP_TOKEN is set (then one Sonnet call per monitored company).
 # Only runs if Tier 1 detected new data.
 
 set -e
@@ -21,20 +21,16 @@ echo "[$(date)] DRY_RUN=$DRY_RUN" | tee -a "$LOG_FILE"
 
 # ===== Run Claude-based agents =====
 
-# action-items-sync: Extract actions from Granola, daily, session → ACTION-ITEMS.md
+# action-items-sync: suggest new items (Granola, session note, deal next actions) in the daily brief. Never writes ACTION-ITEMS.md.
 echo "[$(date)] Running action-items-sync..." | tee -a "$LOG_FILE"
 DRY_RUN=$DRY_RUN node agents/action-items-sync.js >> "$LOG_FILE" 2>&1 || echo "[$(date)] action-items-sync failed (non-fatal)" | tee -a "$LOG_FILE"
 
-# deal-status-sync: Pull signals from Granola/Gmail/Calendar, rank deals → daily brief
+# deal-status-sync: live deals from 30-deals frontmatter + Granola → "Deal Pulse" in the daily brief.
+# The agent skips itself when there are fewer than 5 live deals.
 echo "[$(date)] Running deal-status-sync..." | tee -a "$LOG_FILE"
-ACTIVE_DEALS=$(grep -c "| 🔥\|| 🟡\|| 🧊" ~/Library/Mobile\ Documents/iCloud~md~obsidian/Documents/f13i-brain/00-index/01-index.md 2>/dev/null || echo "0")
-if [ "$ACTIVE_DEALS" -ge 5 ]; then
-  DRY_RUN=$DRY_RUN node agents/deal-status-sync.js >> "$LOG_FILE" 2>&1 || echo "[$(date)] deal-status-sync failed (non-fatal)" | tee -a "$LOG_FILE"
-else
-  echo "[$(date)] Skipping deal-status-sync (only $ACTIVE_DEALS active deals, need 5+)" | tee -a "$LOG_FILE"
-fi
+DRY_RUN=$DRY_RUN node agents/deal-status-sync.js >> "$LOG_FILE" 2>&1 || echo "[$(date)] deal-status-sync failed (non-fatal)" | tee -a "$LOG_FILE"
 
-# pricing-intel: Monitor companies for pricing changes
+# pricing-intel: digest for 10-brain/06-companies-to-monitor.md → 90-scratch/daily/<date>-pricing-intel.md
 echo "[$(date)] Running pricing-intel..." | tee -a "$LOG_FILE"
 DRY_RUN=$DRY_RUN node agents/pricing-intel.js >> "$LOG_FILE" 2>&1 || echo "[$(date)] pricing-intel failed (non-fatal)" | tee -a "$LOG_FILE"
 

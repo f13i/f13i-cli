@@ -1,232 +1,152 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
-const obsidian = require('../utils/obsidian-reader');
-const { callMCPs } = require('../utils/mcp-orchestrator');
+const fs = require('fs');
+const path = require('path');
 const logger = require('../utils/logger');
+const {
+  VAULT, isLive, localDate, loadDeals, loadRecentMeetings, matchMeetingToDeal,
+} = require('../utils/deals');
+const { upsertSection } = require('../utils/daily-brief');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
+const GRANOLA_LOOKBACK_DAYS = 2;
+const SECTION = 'Suggested action items';
+const ACTION_ITEMS = path.join(VAULT, '00-f13i', 'ACTION-ITEMS.md');
 
 /**
- * action-items-sync: Keep ACTION-ITEMS.md current by pulling from vault sources.
- * Runs at session start after outbound-sync, before Mode 1 morning snapshot.
+ * action-items-sync: suggest, never write ACTION-ITEMS.md.
  *
- * Scans:
- * 1a. Granola (48h) — extract Farhan's action items
- * 1b. Daily brief (latest) — capture flagged items
- * 1c. Session note (latest) — carry-forward open items
- * 1d. Deal folders — check next-move field for updates
- *
- * Updates ACTION-ITEMS.md in locked entry format.
- * Logs changes and suggested first move.
+ * ACTION-ITEMS.md is curated by hand, so this agent only proposes. It collects
+ * candidate tasks from:
+ *   1. Granola (48h): "Next Steps" bullets marked (Farhan), only from meetings
+ *      that match a deal folder, so personal meetings never leak in.
+ *   2. The latest session note: unchecked items under "## Open items".
+ *   3. Live deals: the `next_action` frontmatter field, for deals that have no
+ *      open item in ACTION-ITEMS.md yet.
+ * Anything already on ACTION-ITEMS.md is dropped. The rest goes to a
+ * "## Suggested action items" section in today's daily brief, in the locked
+ * entry format, ready to paste. Replaced on each run. No model calls.
  */
 
-const LOCKED_ENTRY_FORMAT = /^- \[([ x])\] (.+?) \| (.+?) \| (.+?) \| (.+)$/;
+const norm = (s) => String(s).toLowerCase().replace(/\[\[[^\]]*\]\]|\([^)]*\)|[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 
-/**
- * Parse a locked-format entry.
- */
-function parseEntry(line) {
-  const m = LOCKED_ENTRY_FORMAT.exec(line);
-  if (!m) return null;
-  return {
-    done: m[1] === 'x',
-    task: m[2],
-    owner: m[3],
-    dueDate: m[4],
-    source: m[5],
-    line, // Original line for comparison
-  };
+/** Rough "already tracked" check: most of the candidate's words appear in one open item. */
+function alreadyTracked(task, openItems) {
+  const words = norm(task).split(' ').filter((w) => w.length > 3);
+  if (!words.length) return true;
+  return openItems.some((item) => {
+    const hits = words.filter((w) => item.includes(w)).length;
+    return hits / words.length >= 0.6;
+  });
 }
 
-/**
- * Format a locked-entry for ACTION-ITEMS.md.
- */
-function formatEntry(task, owner = 'Farhan', dueDate = 'open', source = '[vault]') {
-  return `- [ ] ${task} | ${owner} | ${dueDate} | ${source}`;
+function entry(task, source) {
+  return `- [ ] ${task.replace(/\s*\|\s*/g, ' / ')} | Farhan | open | ${source}`;
 }
 
-/**
- * Dedup by source link — if exact source exists, update it; else add new.
- */
-function dedup(existingItems, newItem) {
-  const existing = existingItems.find((e) => e.source === newItem.source);
-  if (existing) {
-    // Update existing entry (task wording may have changed)
-    existing.task = newItem.task;
-    existing.dueDate = newItem.dueDate;
-    return false; // Not a new item
+/** "Next Steps" bullets assigned to Farhan in a Granola summary. */
+function farhanNextSteps(summary) {
+  const m = summary.match(/^#+\s*Next Steps[^\n]*\n([\s\S]*?)(?=\n#+\s|\n---|(?![\s\S]))/im);
+  if (!m) return [];
+  const out = [];
+  for (const line of m[1].split('\n')) {
+    const b = line.match(/^\s*[-*]\s+\*\*(.+?)\*\*\s*\((?:[^)]*\b)?Farhan\b[^)]*\)/i);
+    if (b) out.push(b[1].trim());
   }
-  return true; // Is new
+  return out;
+}
+
+function latestSessionOpenItems() {
+  const dir = path.join(VAULT, '90-scratch', 'sessions');
+  if (!fs.existsSync(dir)) return { name: null, items: [] };
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'))
+    .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.t - a.t);
+  if (!files.length) return { name: null, items: [] };
+  const name = files[0].f.replace(/\.md$/, '');
+  const text = fs.readFileSync(path.join(dir, files[0].f), 'utf8');
+  const sec = text.match(/^##\s*Open items[^\n]*\n([\s\S]*?)(?=\n##\s|(?![\s\S]))/im);
+  const items = sec ? (sec[1].match(/^\s*- \[ \] (.+)$/gm) || []).map((l) => l.replace(/^\s*- \[ \] /, '').trim()) : [];
+  return { name, items };
 }
 
 async function run() {
   logger.info('action-items-sync started', { dryRun: DRY_RUN });
 
-  try {
-    // Load current ACTION-ITEMS.md
-    let itemsContent = '';
-    try {
-      itemsContent = await obsidian.readNote('00-f13i/ACTION-ITEMS.md');
-    } catch {
-      logger.warn('ACTION-ITEMS.md not found, starting fresh');
-      itemsContent = '# Action Items\n\n## Pipeline\n\n## Clients\n\n## Content\n\n## Internal\n\n';
-    }
+  const actionItems = fs.existsSync(ACTION_ITEMS) ? fs.readFileSync(ACTION_ITEMS, 'utf8') : '';
+  // Only the live part of the file; the Archive section is history.
+  const live = actionItems.split(/^## Archive/m)[0];
+  const openLines = (live.match(/^\s*- \[ \] .+$/gm) || []);
+  const openItems = openLines.map(norm);
 
-    const newItems = [];
+  const deals = loadDeals();
+  const candidates = [];
+  const seen = new Set();
+  const add = (task, source, origin) => {
+    const key = norm(task);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    if (alreadyTracked(task, openItems)) return;
+    candidates.push({ task, source, origin });
+  };
 
-    // 1a. Granola (48h)
-    logger.debug('Scanning Granola (48h)');
-    try {
-      const granola = await callMCPs({ company: 'f13i', dryRun: DRY_RUN });
-      const meetings = granola.meetings || [];
-      meetings.forEach((m) => {
-        if (m.actionItems && Array.isArray(m.actionItems)) {
-          m.actionItems.forEach((item) => {
-            newItems.push({
-              task: item.description || item.text || 'Action from ' + (m.title || 'meeting'),
-              owner: 'Farhan',
-              dueDate: 'open',
-              source: `[Granola: ${m.title}](https://granola.ai)`, // Placeholder URL
-            });
-          });
-        }
-      });
-    } catch (err) {
-      logger.warn(`Granola scan failed: ${err.message}`);
-    }
-
-    // 1b. Daily brief (latest)
-    logger.debug('Scanning daily brief');
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const daily = await obsidian.readNote(`90-scratch/daily/${today}.md`);
-      // Extract items flagged with TODO or [ ] in the brief
-      const todoMatches = daily.match(/- \[ \] (.+)/g) || [];
-      todoMatches.forEach((match) => {
-        const task = match.replace(/^- \[ \] /, '').trim();
-        newItems.push({
-          task,
-          owner: 'Farhan',
-          dueDate: 'open',
-          source: `[daily: ${today}](../90-scratch/daily/${today}.md)`,
-        });
-      });
-    } catch (err) {
-      logger.debug(`Daily brief scan: ${err.message}`);
-    }
-
-    // 1c. Latest session note (carry-forward)
-    logger.debug('Scanning session note for open items');
-    try {
-      const sessionDir = `${process.env.OBSIDIAN_VAULT_PATH}/90-scratch/sessions`;
-      const { execSync } = require('child_process');
-      const latestSession = execSync(`ls -t "${sessionDir}"/*.md 2>/dev/null | head -1`, {
-        encoding: 'utf-8',
-      }).trim();
-
-      if (latestSession) {
-        const sessionName = latestSession.split('/').pop().replace('.md', '');
-        const sessionContent = await obsidian.readNote(`90-scratch/sessions/${sessionName}.md`);
-        const openItemsMatch = sessionContent.match(/## Open items.*?\n([\s\S]*?)(?=##|$)/);
-        if (openItemsMatch) {
-          const itemsText = openItemsMatch[1];
-          const itemMatches = itemsText.match(/- \[[ x]\] (.+)/g) || [];
-          itemMatches.forEach((match) => {
-            const task = match.replace(/^- \[[ x]\] /, '').trim();
-            newItems.push({
-              task,
-              owner: 'Farhan',
-              dueDate: 'open',
-              source: `[session: ${sessionName}](../90-scratch/sessions/${sessionName}.md)`,
-            });
-          });
-        }
-      }
-    } catch (err) {
-      logger.debug(`Session note scan: ${err.message}`);
-    }
-
-    // 1d. Deal folders (Active Pipeline only)
-    logger.debug('Scanning deal folders');
-    try {
-      const index = await obsidian.readNote('00-index/index.md');
-      // Parse Active Pipeline table to get deal names
-      const pipelineMatch = index.match(/\| \*\*(.+?)\*\*.+?\|/g) || [];
-      pipelineMatch.forEach((match) => {
-        const company = match.replace(/\| \*\*|\*\*.*?\|/g, '').trim();
-        try {
-          const dealIndex = obsidian.readNote(`30-deals/${company}/index.md`);
-          // Extract "Next move:" field
-          const nextMoveMatch = dealIndex.match(/Next move:?\s*(.+?)(?:\n|$)/);
-          if (nextMoveMatch) {
-            const nextMove = nextMoveMatch[1].trim();
-            if (nextMove && nextMove !== '—') {
-              newItems.push({
-                task: `[${company}] ${nextMove}`,
-                owner: 'Farhan',
-                dueDate: 'open',
-                source: `[deal: ${company}](../30-deals/${company}/index.md)`,
-              });
-            }
-          }
-        } catch {
-          // Deal folder doesn't exist or no index.md
-        }
-      });
-    } catch (err) {
-      logger.debug(`Deal scan: ${err.message}`);
-    }
-
-    // Dedup new items against existing
-    const existingLines = itemsContent.split('\n').map((line) => parseEntry(line)).filter(Boolean);
-    const dedupedItems = newItems.filter((item) => dedup(existingLines, item));
-    const addedCount = dedupedItems.length;
-
-    // Merge and write back (simplified: just append to Internal section)
-    if (!DRY_RUN && addedCount > 0) {
-      let updated = itemsContent;
-      if (!updated.includes('## Internal')) {
-        updated += '\n## Internal\n';
-      }
-      dedupedItems.forEach((item) => {
-        const entry = formatEntry(item.task, item.owner, item.dueDate, item.source);
-        updated += entry + '\n';
-      });
-
-      await obsidian.writeNote('00-f13i/ACTION-ITEMS.md', updated);
-      logger.info(`ACTION-ITEMS.md updated: +${addedCount} new items`);
-    } else if (DRY_RUN) {
-      logger.info(`[DRY_RUN] Would add ${addedCount} items to ACTION-ITEMS.md`);
-    }
-
-    // Surface summary
-    const overdue = existingLines.filter((e) => {
-      const due = new Date(e.dueDate);
-      return due < new Date() && !e.done;
-    }).length;
-
-    logger.info('action-items-sync completed', {
-      newItems: addedCount,
-      totalOpen: existingLines.filter((e) => !e.done).length,
-      overdue,
-    });
-
-    return {
-      newItems: addedCount,
-      totalOpen: existingLines.filter((e) => !e.done).length,
-      overdue,
-    };
-  } catch (err) {
-    logger.error(`action-items-sync failed: ${err.message}`, { stack: err.stack });
-    throw err;
+  // 1. Granola
+  const { notes, error } = await loadRecentMeetings(GRANOLA_LOOKBACK_DAYS, { withSummaries: true });
+  if (error) logger.warn(`Granola unavailable, skipping meetings: ${error}`);
+  for (const note of notes) {
+    const deal = matchMeetingToDeal(note, deals);
+    if (!deal) continue; // not f13i deal work
+    const src = `[[${deal.link}]] · Granola ${(note.created_at || '').slice(0, 10)}`;
+    farhanNextSteps(note.summary || '').forEach((t) => add(`[${deal.company}] ${t}`, src, 'granola'));
   }
+
+  // 2. Latest session note
+  const session = latestSessionOpenItems();
+  session.items.forEach((t) => add(t, `[[90-scratch/sessions/${session.name}]]`, 'session'));
+
+  // 3. Live deals with a next action and nothing open on ACTION-ITEMS.md
+  // "Await reply" and "Nothing owed" describe a wait, not a task.
+  const isTask = (a) => a && !/^(await|wait|nothing owed|none\b|no action)/i.test(a.trim());
+  for (const d of deals.filter((x) => isLive(x.status) && isTask(x.nextAction))) {
+    const tracked = openLines.some((l) => l.includes(`30-deals/${d.folder}/`) || l.includes(`30-deals/${d.folder}]`));
+    if (tracked) continue;
+    add(`[${d.company}] ${d.nextAction}`, `[[${d.link}]]`, 'deal');
+  }
+
+  const byOrigin = (o) => candidates.filter((c) => c.origin === o).length;
+  const counts = { granola: byOrigin('granola'), session: byOrigin('session'), deal: byOrigin('deal') };
+
+  const body = candidates.length
+    ? [
+      `Not on [[00-f13i/ACTION-ITEMS]] yet. Copy what's real into the right section; ignore the rest.`,
+      error ? `_Granola unavailable this run: ${error}_` : '',
+      '',
+      ...candidates.map((c) => entry(c.task, c.source)),
+    ].filter((l, i) => l !== '' || i > 1).join('\n')
+    : `Nothing new. Everything found is already on [[00-f13i/ACTION-ITEMS]].${error ? ` (Granola unavailable: ${error})` : ''}`;
+
+  if (DRY_RUN) {
+    console.log(body);
+    logger.info('[DRY_RUN] Suggestions not written', counts);
+  } else {
+    const file = upsertSection(SECTION, body);
+    logger.info(`Suggestions written to ${file}`, counts);
+  }
+
+  logger.info('action-items-sync completed', {
+    suggested: candidates.length,
+    ...counts,
+    openOnList: openLines.length,
+    granola: !error,
+  });
+  return { candidates, counts };
 }
 
-module.exports = { run };
+module.exports = { run, farhanNextSteps };
 
 if (require.main === module) {
   run().catch((err) => {
-    logger.error(`Fatal: ${err.message}`);
+    logger.error(`Fatal: ${err.message}`, { stack: err.stack });
     process.exit(1);
   });
 }

@@ -192,9 +192,9 @@ The f13i labs tools live in their own repos.
 | --- | --- |
 | `outbound-sync.js` | pulls Granola, Gmail and Calendar, writes the daily brief |
 | `vault-sync.js` | daily drift detector that keeps deal files current |
-| `action-items-sync.js` | reconciles the action-items list from vault sources |
-| `deal-status-sync.js` | deal pulse and recording-gap detection |
-| `pricing-intel.js` | pricing intelligence run on a company |
+| `action-items-sync.js` | suggests new action items from meetings, session notes and deal files; never edits the curated list |
+| `deal-status-sync.js` | deal pulse: every live deal grouped hot, warm, cold or dark by last touch |
+| `pricing-intel.js` | daily digest of meetings that mention the companies I watch |
 | `linkedin-publish.js` | posts the day's approved LinkedIn draft, with its image, through the LinkedIn API |
 
 ### Skills ([`skills/`](skills/))

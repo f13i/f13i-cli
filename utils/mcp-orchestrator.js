@@ -24,7 +24,7 @@ If a source returns nothing, use an empty array or object. Be concise.`;
  *
  * @returns {{servers: Array, tools: Array}}
  */
-function buildMcp() {
+function buildMcp(sources) {
   const servers = [];
 
   const candidates = [
@@ -34,6 +34,7 @@ function buildMcp() {
 
   for (const c of candidates) {
     if (!c.url) continue;
+    if (sources && !sources.includes(c.name)) continue;
     const server = { type: 'url', url: c.url, name: c.name };
     // OAuth bearer token, only if configured. Without it, authenticated
     // servers will reject the connection (surfaced as a session.error / tool error).
@@ -87,11 +88,12 @@ function parseJson(text) {
  * @param {string} [context.contact] - Person name (preferred identifier).
  * @param {string} [context.company] - Company name.
  * @param {boolean} [context.dryRun] - Skip the live API call.
+ * @param {string[]} [context.sources] - Limit to these servers ('granola', 'pricingsaas').
  * @returns {Promise<{meetings: Array, pricing: Object, timestamp: string}>}
  *          Returns empty shape on any failure (never throws).
  */
 async function callMCPs(context) {
-  const { contact, company, dryRun } = context;
+  const { contact, company, dryRun, sources } = context;
   const identifier = contact || company;
 
   if (dryRun) {
@@ -104,7 +106,7 @@ async function callMCPs(context) {
     return emptyResult();
   }
 
-  const { servers, tools } = buildMcp();
+  const { servers, tools } = buildMcp(sources);
   if (servers.length === 0) {
     logger.warn('No MCP servers configured (set GRANOLA_MCP_URL / PRICINGSAAS_MCP_URL)');
     return emptyResult();

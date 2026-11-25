@@ -3,6 +3,7 @@ require('dotenv').config();
 const obsidian = require('../utils/obsidian-reader');
 const granola = require('../utils/granola-api-client');
 const logger = require('../utils/logger');
+const { localDate } = require('../utils/deals');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH || `${process.env.HOME}/Library/Mobile Documents/iCloud~md~obsidian/Documents/f13i-brain`;
@@ -24,8 +25,8 @@ async function run() {
   const weekAgo = new Date(today);
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const todayStr = today.toISOString().split('T')[0];
-  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  const todayStr = localDate(today); // daily notes are named by local date; UTC rolls over at 6pm CST
+  const yesterdayStr = localDate(yesterday);
 
   const sections = [];
   sections.push(`## Outbound Sync — ${today.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);

@@ -1,243 +1,111 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
-const obsidian = require('../utils/obsidian-reader');
-const { callMCPs } = require('../utils/mcp-orchestrator');
 const logger = require('../utils/logger');
+const {
+  isLive, localDate, daysSince, loadDeals, loadRecentMeetings, matchMeetingToDeal,
+} = require('../utils/deals');
+const { upsertSection } = require('../utils/daily-brief');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
+const MIN_LIVE_DEALS = 5;
+const LOOKBACK_DAYS = 45;
 
 /**
- * deal-status-sync: Surface current status of every active deal from real signals.
- * Pull from Granola (30d), Gmail, Calendar, deal index.
- * Build status cards: Hot (≤7d), Warm (8-21d), Cold (22-45d), Dark (46+d).
+ * deal-status-sync: the deal pulse.
  *
- * Runs at session start (after action-items-sync) if 5+ active deals,
- * or on-demand: "sync deals", "deal pulse", "where are my deals".
+ * Reads every live deal from 30-deals/<slug>/00-INDEX.md frontmatter
+ * (status in the locked "live" set), finds each deal's newest recorded meeting
+ * in Granola, and groups deals by days since last touch:
+ * 🔥 ≤7d · 🟡 ≤21d · 🧊 ≤45d · ⚫ 46d+ (same thresholds as Pipeline.base).
+ *
+ * Writes one "## Deal Pulse" section to today's daily brief, replaced on each
+ * run. No model calls.
  */
 
-function daysSince(dateStr) {
-  if (!dateStr || dateStr === 'open') return Infinity;
-  const date = new Date(dateStr);
-  const now = new Date();
-  return Math.floor((now - date) / (1000 * 60 * 60 * 24));
+function heat(days) {
+  if (days <= 7) return 'hot';
+  if (days <= 21) return 'warm';
+  if (days <= 45) return 'cold';
+  return 'dark';
 }
 
-function statusLabel(daysSinceLastTouch) {
-  if (daysSinceLastTouch <= 7) return '🔥 HOT';
-  if (daysSinceLastTouch <= 21) return '🟡 WARM';
-  if (daysSinceLastTouch <= 45) return '🧊 COLD';
-  return '⚫ DARK';
+function newest(...dates) {
+  return dates.filter((d) => d && !isNaN(new Date(d))).sort().pop() || null;
 }
 
 async function run() {
   logger.info('deal-status-sync started', { dryRun: DRY_RUN });
 
-  try {
-    // Load Active Pipeline from index
-    const indexContent = await obsidian.readNote('00-index/index.md');
-    const pipelineMatch = indexContent.match(/\| \*\*(.+?)\*\*.+?\| ([^\|]+?)\s*\|/g) || [];
-
-    if (pipelineMatch.length === 0) {
-      logger.info('No active deals found');
-      return { deals: [], summary: 'No active pipeline.' };
-    }
-
-    const deals = [];
-
-    // For each deal, pull signals
-    for (const match of pipelineMatch) {
-      const [, company, status] = match.match(/\*\*(.+?)\*\*/).concat(match.match(/\| ([^\|]+?)\s*\|/) || []);
-
-      if (!company) continue;
-
-      logger.debug(`Scanning signals for ${company}`);
-
-      const signals = {
-        granola: { date: null, source: 'none' },
-        gmail: { date: null, source: 'none' },
-        calendar: { date: null, source: 'none' },
-        dealIndex: { date: null, updated: null, nextMove: null },
-      };
-
-      // 1a. Granola signal (30d)
-      try {
-        const granola = await callMCPs({ company, dryRun: DRY_RUN });
-        const meetings = granola.meetings || [];
-        if (meetings.length > 0) {
-          const latest = meetings.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))[0];
-          signals.granola.date = latest.date || new Date().toISOString().split('T')[0];
-          signals.granola.source = latest.title || 'Meeting';
-        }
-      } catch (err) {
-        logger.debug(`Granola signal for ${company}: ${err.message}`);
-      }
-
-      // 1b. Gmail signal (would integrate MCP, placeholder for now)
-      // signals.gmail.date = '[Gmail signal pending]';
-
-      // 1c. Calendar signal (would integrate MCP, placeholder for now)
-      // signals.calendar.date = '[Calendar signal pending]';
-
-      // 1d. Deal index
-      try {
-        const dealIndexPath = `30-deals/${company}/index.md`;
-        const dealContent = await obsidian.readNote(dealIndexPath);
-        const { data, body } = obsidian.parseFrontmatter(dealContent);
-
-        signals.dealIndex.updated = data.updated || null;
-        signals.dealIndex.date = new Date(signals.dealIndex.updated).toISOString().split('T')[0] || null;
-
-        const nextMoveMatch = body.match(/Next move:?\s*(.+?)(?:\n|$)/);
-        if (nextMoveMatch) {
-          signals.dealIndex.nextMove = nextMoveMatch[1].trim();
-        }
-      } catch {
-        logger.debug(`Deal index for ${company} not found`);
-      }
-
-      // Determine last touch (most recent signal)
-      const dateDates = [
-        signals.granola.date,
-        signals.gmail.date,
-        signals.calendar.date,
-        signals.dealIndex.date,
-      ].filter(Boolean);
-
-      let lastTouch = null;
-      let lastTouchSource = 'none';
-      if (dateDates.length > 0) {
-        const sorted = dateDates.sort();
-        lastTouch = sorted[sorted.length - 1];
-        if (lastTouch === signals.granola.date) lastTouchSource = signals.granola.source;
-        else if (lastTouch === signals.gmail.date) lastTouchSource = 'Gmail';
-        else if (lastTouch === signals.calendar.date) lastTouchSource = 'Calendar';
-        else lastTouchSource = 'Deal index';
-      }
-
-      const daysSinceLastTouch = lastTouch ? daysSince(lastTouch) : Infinity;
-      const label = statusLabel(daysSinceLastTouch);
-
-      const gaps = [];
-      if (!signals.granola.date || daysSince(signals.granola.date) > 30) {
-        gaps.push('⚠️ no recorded meeting (30d)');
-      }
-      if (!signals.gmail.date || daysSince(signals.gmail.date) > 30) {
-        gaps.push('⚠️ no email signal (30d)');
-      }
-      if (signals.dealIndex.updated && daysSince(signals.dealIndex.updated) > 14) {
-        gaps.push(`⚠️ deal file stale — last updated ${signals.dealIndex.updated}`);
-      }
-      if (!signals.dealIndex.nextMove || signals.dealIndex.nextMove === '—') {
-        gaps.push('⚠️ no next move defined');
-      }
-
-      deals.push({
-        company,
-        status: status.trim(),
-        label,
-        lastTouch: lastTouch || 'never',
-        lastTouchSource,
-        daysSince: daysSinceLastTouch,
-        nextMove: signals.dealIndex.nextMove || '[no next move]',
-        gaps,
-        signals,
-      });
-    }
-
-    // Group by label
-    const hot = deals.filter((d) => d.label.includes('HOT'));
-    const warm = deals.filter((d) => d.label.includes('WARM'));
-    const cold = deals.filter((d) => d.label.includes('COLD'));
-    const dark = deals.filter((d) => d.label.includes('DARK'));
-
-    // Surface deal pulse
-    const output = [];
-    output.push(`DEAL PULSE — ${new Date().toLocaleDateString()} — ${deals.length} active deals`);
-    output.push('');
-
-    if (hot.length > 0) {
-      output.push('🔥 HOT (last 7 days)');
-      hot.forEach((d) => {
-        output.push(`  ${d.company} — via ${d.lastTouchSource} on ${d.lastTouch}`);
-        if (d.gaps.length > 0) output.push(`    ${d.gaps.join(', ')}`);
-      });
-      output.push('');
-    }
-
-    if (warm.length > 0) {
-      output.push('🟡 WARM (8-21 days)');
-      warm.forEach((d) => {
-        output.push(`  ${d.company} — via ${d.lastTouchSource} on ${d.lastTouch}`);
-        if (d.gaps.length > 0) output.push(`    ${d.gaps.join(', ')}`);
-      });
-      output.push('');
-    }
-
-    if (cold.length > 0) {
-      output.push('🧊 COLD (22-45 days)');
-      cold.forEach((d) => {
-        output.push(`  ${d.company} — via ${d.lastTouchSource} on ${d.lastTouch}`);
-        if (d.gaps.length > 0) output.push(`    ${d.gaps.join(', ')}`);
-      });
-      output.push('');
-    }
-
-    if (dark.length > 0) {
-      output.push('⚫ DARK (46+ days) — NEEDS TRIAGE');
-      dark.forEach((d) => {
-        output.push(`  ${d.company} — last signal: ${d.lastTouch} (${d.daysSince} days ago)`);
-        output.push(`    ${d.gaps.join(', ')}`);
-      });
-      output.push('');
-    }
-
-    // Suggest first move
-    const topDeal = deals.sort((a, b) => a.daysSince - b.daysSince)[0];
-    if (topDeal) {
-      output.push(`👉 First move: Follow up with ${topDeal.company} (last touch: ${topDeal.daysSince}d ago)`);
-    }
-
-    const summary = output.join('\n');
-    logger.info('deal-status-sync completed', {
-      total: deals.length,
-      hot: hot.length,
-      warm: warm.length,
-      cold: cold.length,
-      dark: dark.length,
-    });
-
-    // Optionally write to daily brief (if not DRY_RUN)
-    if (!DRY_RUN) {
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        let dailyContent = '';
-        try {
-          dailyContent = await obsidian.readNote(`90-scratch/daily/${today}.md`);
-        } catch {
-          dailyContent = `# ${today}\n`;
-        }
-
-        const dealPulseBlock = `\n## Deal Pulse\n${summary}\n`;
-        const updated = dailyContent + dealPulseBlock;
-        await obsidian.writeNote(`90-scratch/daily/${today}.md`, updated);
-        logger.info(`Deal pulse appended to daily brief`);
-      } catch (err) {
-        logger.warn(`Could not append to daily brief: ${err.message}`);
-      }
-    }
-
-    return { summary, deals, counts: { hot: hot.length, warm: warm.length, cold: cold.length, dark: dark.length } };
-  } catch (err) {
-    logger.error(`deal-status-sync failed: ${err.message}`, { stack: err.stack });
-    throw err;
+  const live = loadDeals().filter((d) => isLive(d.status));
+  if (live.length < MIN_LIVE_DEALS) {
+    logger.info(`Skipping: ${live.length} live deals, need ${MIN_LIVE_DEALS}+`);
+    return { skipped: true, live: live.length };
   }
+
+  const { notes, error } = await loadRecentMeetings(LOOKBACK_DAYS, { withSummaries: true });
+  if (error) logger.warn(`Granola unavailable, using deal files only: ${error}`);
+
+  // Newest meeting per deal
+  const lastMeeting = new Map();
+  for (const note of notes) {
+    const deal = matchMeetingToDeal(note, live);
+    if (!deal) continue;
+    const date = (note.created_at || '').slice(0, 10);
+    const prev = lastMeeting.get(deal.folder);
+    if (!prev || date > prev.date) lastMeeting.set(deal.folder, { date, title: note.title || 'meeting' });
+  }
+
+  const rows = live.map((d) => {
+    const meeting = lastMeeting.get(d.folder);
+    const lastTouch = newest(d.lastTouchDate, meeting && meeting.date);
+    const days = daysSince(lastTouch);
+    const via = meeting && lastTouch === meeting.date ? `Granola: ${meeting.title}` : 'deal file';
+    const gaps = [];
+    if (!d.nextAction) gaps.push('no next action');
+    if (daysSince(d.fm.updated) > 14) gaps.push(`deal file last updated ${d.fm.updated || 'never'}`);
+    return { ...d, lastTouch, days, via, heat: heat(days), gaps };
+  }).sort((a, b) => a.days - b.days);
+
+  const groups = {
+    hot: ['🔥 HOT (≤7 days)'],
+    warm: ['🟡 WARM (8-21 days)'],
+    cold: ['🧊 COLD (22-45 days)'],
+    dark: ['⚫ DARK (46+ days): needs a decision'],
+  };
+  const L = [`${rows.length} live deals · ${localDate()}${error ? ' · Granola unavailable, deal files only' : ''}`, ''];
+  for (const [key, [title]] of Object.entries(groups)) {
+    const inGroup = rows.filter((r) => r.heat === key);
+    if (!inGroup.length) continue;
+    L.push(`**${title}**`);
+    for (const r of inGroup) {
+      const when = r.lastTouch ? `${r.lastTouch} (${r.days}d, ${r.via})` : 'no date on file';
+      L.push(`- [[${r.link}|${r.company}]] · \`${r.status}\` · last touch ${when}`);
+      if (r.nextAction) L.push(`  - next: ${r.nextAction}`);
+      if (r.gaps.length) L.push(`  - ⚠️ ${r.gaps.join(' · ')}`);
+    }
+    L.push('');
+  }
+
+  const counts = Object.fromEntries(Object.keys(groups).map((k) => [k, rows.filter((r) => r.heat === k).length]));
+  const body = L.join('\n');
+
+  if (DRY_RUN) {
+    console.log(body);
+    logger.info('[DRY_RUN] Deal pulse not written', counts);
+  } else {
+    const file = upsertSection('Deal Pulse', body);
+    logger.info(`Deal pulse written to ${file}`, counts);
+  }
+
+  logger.info('deal-status-sync completed', { live: rows.length, ...counts, granola: !error });
+  return { rows, counts };
 }
 
 module.exports = { run };
 
 if (require.main === module) {
   run().catch((err) => {
-    logger.error(`Fatal: ${err.message}`);
+    logger.error(`Fatal: ${err.message}`, { stack: err.stack });
     process.exit(1);
   });
 }
